@@ -19,7 +19,6 @@ def init_firebase():
 db = init_firebase()
 
 def parse_date(date_str):
-    # 하이픈(-)이나 점(.) 모두 대응
     clean_str = date_str.replace(".", "-")
     return datetime.strptime(clean_str, "%Y-%m-%d")
 
@@ -28,7 +27,7 @@ st.title("🏥 한의원 스마트 CRM 시스템")
 tab1, tab2 = st.tabs(["📄 일일결산 PDF 업로드", "🔔 해피콜 타임라인 (5일)"])
 
 # ==========================================
-# 탭 1: PDF 업로드 및 저장 (연속 내원 보장 로직)
+# 탭 1: PDF 업로드 및 저장
 # ==========================================
 with tab1:
     st.info("같은 환자라도 날짜가 다르면 정상 저장됩니다. 동일 날짜의 중복 데이터만 제외합니다.")
@@ -38,7 +37,6 @@ with tab1:
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
         full_text = "".join([page.get_text().replace("\n", "") for page in doc])
         
-        # 헤더 건너뛰기 로직
         marker = "통장"
         first_idx = full_text.find(marker)
         target_text = full_text
@@ -64,11 +62,9 @@ with tab1:
                     duplicates = []
 
                     for _, row in df.iterrows():
-                        # [핵심] 차트번호 + 날짜를 결합한 고유 ID (예: 001234_20260430)
                         visit_id = f"{row['차트번호']}_{row['진료일자'].replace('-', '')}"
                         visit_ref = db.collection("visits").document(visit_id)
                         
-                        # 해당 날짜의 진료 기록이 이미 있는지 확인
                         if visit_ref.get().exists:
                             duplicates.append(f"{row['환자명']}({row['진료일자']})")
                             continue
@@ -76,19 +72,16 @@ with tab1:
                         new_count += 1
                         visit_date_obj = parse_date(row["진료일자"])
                         
-                        # 환자 마스터 정보 조회
                         patient_ref = db.collection("patients").document(row["차트번호"])
                         doc_snap = patient_ref.get()
                         
                         stage = 0
                         if doc_snap.exists:
                             pat_data = doc_snap.to_dict()
-                            # 마지막 내원일로부터 30일 이내인지 체크하여 알림 단계 결정
                             last_v = pat_data.get("last_visit", "2000-01-01")
                             if (visit_date_obj - parse_date(last_v)).days <= 30:
                                 stage = pat_data.get("notification_stage", 0)
                         
-                        # 다음 알림일 계산 (항상 '진료일' 기준)
                         if stage == 0:
                             next_date = (visit_date_obj + timedelta(days=3)).strftime("%Y-%m-%d")
                         elif stage == 1:
@@ -96,7 +89,6 @@ with tab1:
                         else:
                             next_date = None
 
-                        # 1. 마스터 정보 업데이트 (최신 내원일과 알림일 갱신)
                         batch.set(patient_ref, {
                             "name": row["환자명"],
                             "chart_no": row["차트번호"],
@@ -106,7 +98,6 @@ with tab1:
                             "updated_at": firestore.SERVER_TIMESTAMP
                         }, merge=True)
                         
-                        # 2. 날짜별 개별 진료 기록 저장 (중복 체크의 기준)
                         batch.set(visit_ref, {
                             "chart_no": row["차트번호"],
                             "name": row["환자명"],
@@ -126,7 +117,7 @@ with tab1:
                     st.error(f"❌ 저장 오류: {e}")
 
 # ==========================================
-# 탭 2: 해피콜 타임라인 (5일 시각화)
+# 탭 2: 해피콜 타임라인 (심플 뷰)
 # ==========================================
 with tab2:
     today_obj = datetime.now()
@@ -134,7 +125,6 @@ with tab2:
     
     st.markdown("### 📅 해피콜 스케줄 보드")
     
-    # 날짜별 바구니 준비
     alerts_by_date = {date: [] for date in timeline_dates}
     
     patients_ref = db.collection("patients").stream()
@@ -145,7 +135,6 @@ with tab2:
         
         if not next_alert or not last_visit: continue
         
-        # 30일 경과 체크
         if (today_obj - parse_date(last_visit)).days >= 30:
             db.collection("patients").document(doc.id).update({
                 "next_alert_date": firestore.DELETE_FIELD,
@@ -155,7 +144,7 @@ with tab2:
 
         if next_alert in alerts_by_date:
             alerts_by_date[next_alert].append(pat)
-        elif next_alert < timeline_dates[0]: # 밀린 업무
+        elif next_alert < timeline_dates[0]:
             alerts_by_date[timeline_dates[0]].append(pat)
 
     cols = st.columns(5)
@@ -174,15 +163,7 @@ with tab2:
             for p in alerts_by_date[d_str]:
                 stage = p.get("notification_stage", 0)
                 txt = "3일차" if stage == 0 else "7일차"
-                with st.container():
-                    st.write(f"**{p['name']}** ({txt})")
-                    if st.button("✅ 완료", key=f"{p['chart_no']}_{d_str}"):
-                        new_s = stage + 1
-                        upd = {"notification_stage": new_s}
-                        if new_s == 1:
-                            upd["next_alert_date"] = (parse_date(p['last_visit']) + timedelta(days=7)).strftime("%Y-%m-%d")
-                        else:
-                            upd["next_alert_date"] = firestore.DELETE_FIELD
-                        db.collection("patients").document(p['chart_no']).update(upd)
-                        st.rerun()
-                    st.markdown("---")
+                
+                # [수정] 버튼 제거하고 이름과 일차만 심플하게 텍스트로 표시
+                st.write(f"**{p['name']}** ({txt})")
+                st.markdown("---")
