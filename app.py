@@ -76,6 +76,7 @@ def extract_text_from_pdf(uploaded_file):
 def extract_patient_info(pdf_text):
     """
     PDF 텍스트에서 차트번호와 환자명 정보를 추출합니다.
+    차트번호는 5자리에서 7자리 숫자를 유연하게 추출합니다.
     Args:
         pdf_text (str): PDF에서 추출된 전체 텍스트.
     Returns:
@@ -84,10 +85,10 @@ def extract_patient_info(pdf_text):
     found_pairs = set() # 중복 제거를 위해 set 사용 (튜플 형태로 저장)
 
     # 시도 1: '차트번호: 123456 환자명: 김철수' 형태
-    # '차트번호', 'chart no', '차트No', '차트' 중 하나, 공백, 콜론, 공백, 6자리 숫자 캡처
+    # '차트번호', 'chart no', '차트No', '차트' 중 하나, 공백, 콜론, 공백, 5~7자리 숫자 캡처 (유연성 추가)
     # '환자명', 'patient name', '환자' 중 하나, 공백, 콜론, 공백, 한글 또는 공백 캡처
     pattern1 = re.compile(
-        r'(?:차트번호|chart\s*no|차트No|차트)\s*:\s*(\d{6})\s*(?:환자명|patient\s*name|환자)\s*:\s*([가-힣\s]+)',
+        r'(?:차트번호|chart\s*no|차트No|차트)\s*:\s*(\d{5,7})\s*(?:환자명|patient\s*name|환자)\s*:\s*([가-힣\s]+)',
         re.IGNORECASE # 대소문자 구분 없이 매칭
     )
 
@@ -98,10 +99,11 @@ def extract_patient_info(pdf_text):
 
     # 참고: '123456 김철수'와 같이 레이블 없는 패턴은 오탐율이 높아 주석 처리합니다.
     # 만약 이런 형식이 반드시 필요하다면, 해당 텍스트 주변의 맥락을 고려하는 복잡한 로직이 필요합니다.
-    # pattern2 = re.compile(r'(\d{6})\s+([가-힣]{2,5})\b')
+    # pattern2 = re.compile(r'(\d{5,7})\s+([가-힣]{2,5})\b') # 5~7자리 숫자에 2~5글자 한글 이름
     # matches2 = pattern2.findall(pdf_text)
     # for chart_no, patient_name in matches2:
     #     found_pairs.add((chart_no.strip(), patient_name.strip()))
+
 
     # set에 저장된 튜플들을 딕셔너리 리스트로 변환하여 반환
     # 정렬하여 일관된 순서 유지
@@ -124,10 +126,10 @@ if uploaded_file is not None:
         pdf_text = extract_text_from_pdf(uploaded_file)
         st.session_state.full_pdf_text = pdf_text # 추출된 전체 텍스트를 세션 상태에 저장
 
-        st.subheader("📄 PDF 내용 미리보기 (일부)")
-        # 원본 텍스트 보기 기능을 expander로 제공하여 UI를 깔끔하게 유지
-        with st.expander("원본 PDF 전체 텍스트 보기", expanded=False):
-            st.code(pdf_text, language='text') # 텍스트 코드 블록으로 표시
+        st.subheader("📄 PDF 내용 미리보기")
+        # PDF 원본 텍스트 보기 기능을 expander로 제공하여 UI를 깔끔하게 유지
+        with st.expander("원본 PDF 전체 텍스트 보기", expanded=False): # expanded=False로 기본적으로 접힌 상태
+            st.code(pdf_text, language='text', height=300) # 텍스트 코드 블록으로 표시, 높이 지정
         st.write(f"PDF에서 총 **{len(pdf_text)}** 자 추출되었습니다.")
 
         if st.button("정보 추출 시작"):
@@ -244,18 +246,21 @@ else:
 st.markdown("---")
 
 # --- 4. 전체 PDF 텍스트 확인 (디버깅용) ---
-st.header("4. 전체 PDF 텍스트 확인 (디버깅 및 상세 분석용)")
-if 'full_pdf_text' in st.session_state and st.session_state.full_pdf_text:
-    st.info("아래는 업로드된 PDF에서 추출된 전체 텍스트입니다. 정보 추출이 제대로 안 될 경우 원인 분석에 활용하세요.")
-    st.text_area(
-        "PDF에서 추출된 원본 텍스트:", # 레이블을 더 명확하게 변경
-        st.session_state.full_pdf_text,
-        height=400, # 적당한 높이 설정
-        key="debug_pdf_text_area",
-        help="이 영역은 PDF에서 추출된 모든 텍스트를 보여줍니다. 정규 표현식이 예상대로 동작하지 않을 때, 이 텍스트를 통해 원본 데이터를 확인하고 패턴을 조정할 수 있습니다."
-    )
-else:
-    st.info("업로드된 PDF 파일이 없거나 텍스트 추출이 아직 이루어지지 않았습니다.")
+# 이 섹션은 이미 '1. PDF 업로드 및 정보 추출' 섹션 내의 expander로 옮겨졌으므로, 중복을 피하기 위해 제거하거나 다른 용도로 변경할 수 있습니다.
+# 사용자 요청에 따라 '1. PDF 업로드 및 정보 추출' 섹션에 있는 `st.expander`를 통해 해당 기능을 제공하고 있습니다.
+# 아래 디버깅용 텍스트 영역은 주석 처리하거나 필요시 재활용하세요.
+# st.header("4. 전체 PDF 텍스트 확인 (디버깅 및 상세 분석용)")
+# if 'full_pdf_text' in st.session_state and st.session_state.full_pdf_text:
+#     st.info("아래는 업로드된 PDF에서 추출된 전체 텍스트입니다. 정보 추출이 제대로 안 될 경우 원인 분석에 활용하세요.")
+#     st.text_area(
+#         "PDF에서 추출된 원본 텍스트:", # 레이블을 더 명확하게 변경
+#         st.session_state.full_pdf_text,
+#         height=400, # 적당한 높이 설정
+#         key="debug_pdf_text_area",
+#         help="이 영역은 PDF에서 추출된 모든 텍스트를 보여줍니다. 정규 표현식이 예상대로 동작하지 않을 때, 이 텍스트를 통해 원본 데이터를 확인하고 패턴을 조정할 수 있습니다."
+#     )
+# else:
+#     st.info("업로드된 PDF 파일이 없거나 텍스트 추출이 아직 이루어지지 않았습니다.")
 
 st.markdown("---")
 st.caption("© 2023 한의원 전용 소프트웨어. Streamlit & Firestore 기반.")
