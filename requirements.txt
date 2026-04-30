@@ -1,5 +1,5 @@
 streamlit
 google-generativeai
 pandas
-pdfplumber
+pymupdf
 firebase-admin
