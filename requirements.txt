@@ -1,0 +1,1 @@
+streamlit\ngoogle-generativeai\npandas\npdfplumber\nfirebase-admin
