@@ -113,6 +113,7 @@ uploaded_file = st.file_uploader("PDF 일일결산서를 업로드하세요.", t
 if uploaded_file is not None:
     try:
         pdf_text = extract_text_from_pdf(uploaded_file)
+        st.session_state.full_pdf_text = pdf_text # 추출된 전체 텍스트를 세션 상태에 저장
 
         st.subheader("📄 PDF 내용 미리보기 (일부)")
         st.expander("전체 텍스트 보기", expanded=False).code(pdf_text)
@@ -134,12 +135,18 @@ if uploaded_file is not None:
 
     except fitz.FileDataError as e:
         st.error(e)
+        if 'full_pdf_text' in st.session_state: # 오류 발생 시에도 기존 텍스트는 지우기
+            del st.session_state.full_pdf_text
     except Exception as e:
         st.error(f"오류 발생: {e}")
+        if 'full_pdf_text' in st.session_state: # 오류 발생 시에도 기존 텍스트는 지우기
+            del st.session_state.full_pdf_text
 else:
-    # 파일이 업로드되지 않았을 때 세션 상태 초기화 (옵션)
+    # 파일이 업로드되지 않았을 때 세션 상태 초기화
     if 'extracted_df' in st.session_state:
         del st.session_state.extracted_df
+    if 'full_pdf_text' in st.session_state: # full_pdf_text도 함께 초기화
+        del st.session_state.full_pdf_text
 
 
 # --- 2. 추출된 데이터 Firestore에 저장 ---
@@ -209,6 +216,21 @@ if db:
             st.error(f"Firestore에서 데이터 불러오기 실패: {e}")
 else:
     st.warning("Firestore 클라이언트가 초기화되지 않아 데이터베이스 기능을 사용할 수 없습니다.")
+
+st.markdown("---")
+
+# --- 4. 전체 PDF 텍스트 확인 (디버깅용) ---
+st.header("4. 전체 PDF 텍스트 (디버깅용)")
+if 'full_pdf_text' in st.session_state and st.session_state.full_pdf_text:
+    st.info("아래는 업로드된 PDF에서 추출된 전체 텍스트입니다. 정보 추출이 제대로 안 될 경우 원인 분석에 활용하세요.")
+    st.text_area(
+        "PDF에서 추출된 전체 텍스트:",
+        st.session_state.full_pdf_text,
+        height=300, # 적당한 높이 설정
+        key="debug_pdf_text_area"
+    )
+else:
+    st.info("업로드된 PDF 파일이 없거나 텍스트 추출이 아직 이루어지지 않았습니다.")
 
 st.markdown("---")
 st.caption("© 2023 한의원 전용 소프트웨어. Streamlit & Firestore 기반.")
