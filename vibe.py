@@ -1,22 +1,18 @@
-import google.generativeai as genai
+from google import genai
 import sys
 import os
-import re  # 정규표현식 추가
+import re
 
-# 1. API 키 확인 및 모델 설정 (아까 성공한 로직 유지)
+# 1. API 키 확인
 api_key = os.environ.get("GEMINI_API_KEY")
-genai.configure(api_key=api_key)
+if not api_key:
+    print("❌ 에러: GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
+    sys.exit(1)
 
-# 똑똑한 모델 자동 탐색
-target_model_name = ""
-for m in genai.list_models():
-    if 'generateContent' in m.supported_generation_methods:
-        name = m.name.replace("models/", "")
-        if "tts" not in name and "robotics" not in name and "clip" not in name:
-            target_model_name = name
-            if "pro" in name or "flash" in name: break
-
-model = genai.GenerativeModel(target_model_name)
+# 2. 새로운 SDK 클라이언트 설정
+client = genai.Client(api_key=api_key)
+# 원장님 계정에서 확인된 가장 최신 모델인 2.5-flash 사용
+MODEL_ID = "gemini-2.5-flash"
 
 def vibe_coding():
     prompt = " ".join(sys.argv[1:])
@@ -27,21 +23,40 @@ def vibe_coding():
         with open("app.py", "r", encoding="utf-8") as f:
             current_code = f.read()
 
-    full_prompt = f"현재 코드:\n{current_code}\n\n요청:\n{prompt}\n\n반드시 ```python ... ``` 안에 전체 코드를 작성해줘."
+    full_prompt = f"""
+    당신은 한의원 전용 소프트웨어 전문가입니다.
+    현재 app.py 코드:
+    {current_code}
 
-    print(f"🚀 {target_model_name} 비서가 코드를 정제 중입니다...")
-    response = model.generate_content(full_prompt)
+    사용자 요청:
+    {prompt}
+
+    반드시 ```python ... ``` 안에 전체 코드를 작성해주세요.
+    """
+
+    print(f"🚀 최신형 {MODEL_ID} 비서가 코드를 정밀 가공 중입니다...")
     
-    # --- [핵심 수정] 마크다운 코드 블록만 정확히 추출 ---
-    code_match = re.search(r"```python\s*(.*?)\s*```", response.text, re.DOTALL)
-    
-    if code_match:
-        new_code = code_match.group(1).strip()
-        with open("app.py", "w", encoding="utf-8") as f:
-            f.write(new_code)
-        print("✅ 인사말을 제외한 '순수 코드'만 app.py에 저장되었습니다!")
-    else:
-        print("❌ 코드를 찾지 못했습니다. AI의 응답을 확인해 주세요.")
+    try:
+        # 새로운 SDK의 생성 방식
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=full_prompt
+        )
+        
+        # 마크다운 코드 블록 추출
+        code_match = re.search(r"
+```python\s*(.*?)\s*```", response.text, re.DOTALL)
+        
+        if code_match:
+            new_code = code_match.group(1).strip()
+            with open("app.py", "w", encoding="utf-8") as f:
+                f.write(new_code)
+            print("✅ 최신 SDK를 사용하여 app.py를 안전하게 업데이트했습니다!")
+        else:
+            print("❌ 코드를 찾지 못했습니다. AI 응답을 확인하세요.")
+            
+    except Exception as e:
+        print(f"❌ 에러 발생: {e}")
 
 if __name__ == "__main__":
     vibe_coding()
