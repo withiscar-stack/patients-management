@@ -37,7 +37,6 @@ with tab1:
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
         full_text = "".join([page.get_text().replace("\n", "") for page in doc])
         
-        # 1. 데이터 시작 마커 찾기
         marker = "통장"
         first_idx = full_text.find(marker)
         target_text = full_text
@@ -46,14 +45,11 @@ with tab1:
             if second_idx != -1:
                 target_text = full_text[second_idx + len(marker):]
         
-        # 2. 유효 데이터 패턴 (차트번호 + 날짜 + 원장님 성함 필수)
-        # 그룹2: 환자명, 그룹3: 차트번호, 그룹4: 진료일자
-        # 패턴 끝에 '이차로'를 명시하여 유효 데이터만 낚아챕니다.
+        # 유효 데이터 패턴 (차트번호 + 날짜 + 원장님 성함)
         pattern = r"(\d+)([가-힣]{2,4})(\d{6})(\d{4}[-.]\d{2}[-.]\d{2})이차로"
         matches = re.findall(pattern, target_text)
         
         if len(matches) > 0:
-            # [수정] 무조건 matches[1:] 하던 코드를 삭제하고, 모든 matches를 유효 데이터로 봅니다.
             data = [{"환자명": m[1], "차트번호": m[2], "진료일자": m[3].replace(".", "-")} for m in matches]
             df = pd.DataFrame(data).drop_duplicates(subset=['차트번호', '진료일자'])
             
@@ -67,9 +63,10 @@ with tab1:
                 try:
                     new_count = 0
                     duplicates = []
+                    batch = db.batch()
 
                     for _, row in df.iterrows():
-                        visit_id = f"{row['차트번호']}_{row['진료일자'].replace('-', '')}"
+                        visit_id = f"{row['chart_no']}_{row['진료일자'].replace('-', '')}" if 'chart_no' in row else f"{row['차트번호']}_{row['진료일자'].replace('-', '')}"
                         visit_ref = db.collection("visits").document(visit_id)
                         
                         if visit_ref.get().exists:
@@ -97,7 +94,7 @@ with tab1:
                         
                         next_date = (current_visit_obj + timedelta(days=3)).strftime("%Y-%m-%d") if stage == 0 else (current_visit_obj + timedelta(days=7)).strftime("%Y-%m-%d")
 
-                        patient_ref.set({
+                        batch.set(patient_ref, {
                             "name": row["환자명"],
                             "chart_no": row["차트번호"],
                             "last_visit": row["진료일자"],
@@ -106,7 +103,7 @@ with tab1:
                             "updated_at": firestore.SERVER_TIMESTAMP
                         }, merge=True)
                         
-                        visit_ref.set({
+                        batch.set(visit_ref, {
                             "chart_no": row["차트번호"],
                             "name": row["환자명"],
                             "visit_date": row["진료일자"],
@@ -114,6 +111,7 @@ with tab1:
                         })
 
                     if new_count > 0:
+                        batch.commit()
                         st.success(f"✅ {new_count}건의 데이터가 성공적으로 처리되었습니다!")
                         st.balloons()
                     if duplicates:
@@ -124,9 +122,48 @@ with tab1:
         else:
             st.error("유효한 데이터(날짜+이차로)를 찾지 못했습니다. 원본 텍스트를 확인해주세요.")
 
-    with st.expander("🔍 원본 텍스트 확인"):
-        st.text(target_text)
-
-# (해피콜 타임라인 탭은 기존과 동일)
+# ==========================================
+# 탭 2: 해피콜 타임라인 (5일 시각화)
+# ==========================================
 with tab2:
-    # ... (기존 코드와 동일)
+    today_obj = datetime.now()
+    timeline_dates = [(today_obj + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(-2, 3)]
+    
+    st.markdown("### 📅 해피콜 스케줄 보드")
+    alerts_by_date = {date: [] for date in timeline_dates}
+    
+    patients_ref = db.collection("patients").stream()
+    for doc in patients_ref:
+        pat = doc.to_dict()
+        next_alert = pat.get("next_alert_date")
+        last_visit = pat.get("last_visit")
+        if not next_alert or not last_visit: continue
+        
+        # 30일 경과 데이터 정리
+        if (today_obj - parse_date(last_visit)).days >= 30:
+            db.collection("patients").document(doc.id).update({
+                "next_alert_date": firestore.DELETE_FIELD,
+                "notification_stage": firestore.DELETE_FIELD
+            })
+            continue
+
+        if next_alert in alerts_by_date:
+            alerts_by_date[next_alert].append(pat)
+        elif next_alert < timeline_dates[0]: # 밀린 업무
+            alerts_by_date[timeline_dates[0]].append(pat)
+
+    cols = st.columns(5)
+    labels = ["D-2 (밀림)", "D-1", "✨ TODAY ✨", "D+1", "D+2"]
+    for idx, (col, d_str) in enumerate(zip(cols, timeline_dates)):
+        with col:
+            if idx == 2:
+                st.markdown(f"#### 🎯 **{labels[idx]}**")
+                st.info(f"**{d_str}**")
+            else:
+                st.markdown(f"**{labels[idx]}**")
+                st.caption(d_str)
+            st.markdown("---")
+            for p in alerts_by_date[d_str]:
+                stage_text = "3일차" if p.get("notification_stage") == 0 else "7일차"
+                st.write(f"**{p['name']}** ({stage_text})")
+                st.markdown("---")
