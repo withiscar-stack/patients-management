@@ -4,14 +4,12 @@ import re
 import pandas as pd
 import firebase_admin
 from firebase_admin import credentials, firestore
-from datetime import datetime, timedelta, timezone # timezone 추가
+from datetime import datetime, timedelta, timezone
 
 st.set_page_config(page_title="한의원 스마트 CRM", layout="wide")
 
-# --- 한국 시간(KST) 설정 ---
 KST = timezone(timedelta(hours=9))
 
-# --- Firebase 초기화 ---
 def init_firebase():
     if not firebase_admin._apps:
         key_dict = dict(st.secrets["textkey"])
@@ -30,9 +28,17 @@ st.title("🏥 한의원 스마트 CRM 시스템")
 tab1, tab2 = st.tabs(["📄 일일결산 PDF 업로드", "🔔 해피콜 타임라인 (5일)"])
 
 # ==========================================
-# 탭 1: PDF 업로드 및 지능형 저장 로직
+# 탭 1: PDF 업로드 및 최근 진료일 표시
 # ==========================================
 with tab1:
+    # [신규 기능] DB를 검색하여 가장 최근에 입력된 진료일자를 화면 상단에 표시
+    latest_visit_query = db.collection("visits").order_by("visit_date", direction=firestore.Query.DESCENDING).limit(1).get()
+    if latest_visit_query:
+        latest_date = latest_visit_query[0].to_dict().get("visit_date")
+        st.success(f"💡 현재 시스템에 등록된 **마지막 진료일자는 [{latest_date}]** 입니다. 중복 업로드에 주의해 주세요!")
+    else:
+        st.info("💡 아직 등록된 진료 데이터가 없습니다.")
+
     st.info("한국 시간(KST) 기준으로 알림 날짜를 정확히 계산합니다.")
     uploaded_file = st.file_uploader("PDF 파일을 업로드하세요", type=['pdf'])
 
@@ -125,18 +131,20 @@ with tab1:
             st.error("데이터를 찾지 못했습니다. 아래 '원본 텍스트'를 확인해주세요.")
 
     with st.expander("🔍 원본 텍스트 확인"):
-        st.text(target_text)
+        if 'target_text' in locals():
+            st.text(target_text)
 
 # ==========================================
-# 탭 2: 해피콜 타임라인 (KST 적용)
+# 탭 2: 해피콜 타임라인
 # ==========================================
 with tab2:
-    # [수정] 한국 시간 기준으로 오늘 날짜 가져오기
     today_obj = datetime.now(KST)
     timeline_dates = [(today_obj + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(-2, 3)]
     
     st.markdown("### 📅 해피콜 스케줄 보드 (한국 시간 기준)")
+    
     alerts_by_date = {date: [] for date in timeline_dates}
+    past_due_alerts = [] # [오류 수정] D-3 이전의 아주 오래된 명단을 담을 별도의 바구니
     
     patients_ref = db.collection("patients").stream()
     for doc in patients_ref:
@@ -145,7 +153,6 @@ with tab2:
         last_visit = pat.get("last_visit")
         if not next_alert or not last_visit: continue
         
-        # 한국 시간 기준으로 30일 경과 체크
         if (today_obj.replace(tzinfo=None) - parse_date(last_visit)).days >= 30:
             db.collection("patients").document(doc.id).update({
                 "next_alert_date": firestore.DELETE_FIELD,
@@ -156,10 +163,12 @@ with tab2:
         if next_alert in alerts_by_date:
             alerts_by_date[next_alert].append(pat)
         elif next_alert < timeline_dates[0]:
-            alerts_by_date[timeline_dates[0]].append(pat)
+            # D-2보다 더 과거인 명단은 별도 바구니로 분리
+            past_due_alerts.append(pat)
 
     cols = st.columns(5)
-    labels = ["D-2 (밀림)", "D-1", "✨ TODAY ✨", "D+1", "D+2"]
+    labels = ["D-2", "D-1", "✨ TODAY ✨", "D+1", "D+2"] # '밀림' 텍스트 제거
+    
     for idx, (col, d_str) in enumerate(zip(cols, timeline_dates)):
         with col:
             if idx == 2:
@@ -173,3 +182,12 @@ with tab2:
                 stage_text = "3일차" if p.get("notification_stage") == 0 else "7일차"
                 st.write(f"**{p['name']}** ({stage_text})")
                 st.markdown("---")
+    
+    # [추가] 달력 아래쪽에 오래된 미완료 명단 따로 표시
+    if past_due_alerts:
+        # 날짜순으로 정렬
+        past_due_alerts = sorted(past_due_alerts, key=lambda x: x.get('next_alert_date', ''))
+        with st.expander(f"🚨 D-3 이전 미완료 해피콜 ({len(past_due_alerts)}명)"):
+            for p in past_due_alerts:
+                stage_text = "3일차" if p.get("notification_stage") == 0 else "7일차"
+                st.write(f"**{p['name']}** ({stage_text}) - 예정일: {p['next_alert_date']}")
