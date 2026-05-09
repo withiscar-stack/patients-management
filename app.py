@@ -187,7 +187,7 @@ with tab2:
     if past_due_alerts:
         # 날짜순으로 정렬
         past_due_alerts = sorted(past_due_alerts, key=lambda x: x.get('next_alert_date', ''))
-        with st.expander(f"🚨 D-3 이전 미완료 해피콜 ({len(past_due_alerts)}명)"):
+        with st.expander(f"🚨 D-3 이전 해피콜 ({len(past_due_alerts)}명)"):
             for p in past_due_alerts:
                 stage_text = "3일차" if p.get("notification_stage") == 0 else "7일차"
                 st.write(f"**{p['name']}** ({stage_text}) - 예정일: {p['next_alert_date']}")
